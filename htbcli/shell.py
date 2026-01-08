@@ -232,8 +232,8 @@ class HTBShell:
             console.print(f"Usage: {mode} <question>")
             return
         question = " ".join(args)
-        system = self._build_system_prompt(ctx, mode)
-        answer = self.ai.ask(system=system, question=question)
+        messages = self._build_chat_messages(ctx, question, mode)
+        answer = self.ai.chat(messages)
         console.print(Panel.fit(answer, title="AI", border_style="magenta"))
         ctx.setdefault("history", []).append({"mode": mode, "q": question, "a": answer})
         self.store.save(self.current, ctx)
@@ -351,7 +351,6 @@ class HTBShell:
         except RuntimeError:
             return
         focus = " ".join(args).strip() if args else ""
-        system = self._build_system_prompt(ctx, mode="general")
         question = (
             "Act as a senior HTB operator. Based on the Target, Services, Creds, Notes, and Tried list, "
             "produce a concrete exploit plan to reach user.txt (and if feasible, root.txt). "
@@ -361,7 +360,8 @@ class HTBShell:
         if focus:
             question += f"Focus: {focus}. "
         question += "Respond in numbered steps with commands and brief rationale."
-        answer = self.ai.ask(system=system, question=question)
+        messages = self._build_chat_messages(ctx, question, mode="general")
+        answer = self.ai.chat(messages)
         console.print(Panel.fit(answer, title="AI Guide", border_style="magenta"))
 
     def _cmd_ai_cheats(self):
@@ -369,14 +369,45 @@ class HTBShell:
             ctx = self._require_current()
         except RuntimeError:
             return
-        system = self._build_system_prompt(ctx, mode="general")
         question = (
             "Generate a compact cheatsheet of ready-to-run commands tailored to the current context. "
             "Prioritize services present and any available creds; include MSSQL, SMB, and file-read commands toward flags. "
             "Avoid generic boilerplate; use the Target and Creds explicitly."
         )
-        answer = self.ai.ask(system=system, question=question)
+        messages = self._build_chat_messages(ctx, question, mode="general")
+        answer = self.ai.chat(messages)
         console.print(Panel.fit(answer, title="AI Cheats", border_style="magenta"))
+
+    def _build_chat_messages(self, ctx: Dict[str, Any], question: str, mode: str) -> List[Dict[str, str]]:
+        system = self._build_system_prompt(ctx, mode)
+        # Build a concise context summary
+        target = ctx.get("target")
+        services = ctx.get("services", [])
+        creds = ctx.get("creds", [])
+        notes = ctx.get("notes", [])[-5:]  # recent notes
+        tried = ctx.get("tried", [])
+        summary = {
+            "target": target,
+            "services": services,
+            "creds": creds,
+            "notes_recent": notes,
+            "tried": tried,
+        }
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": system},
+            {"role": "system", "content": "Context summary: " + json.dumps(summary)},
+        ]
+        # Include recent history for continuity
+        hist = ctx.get("history", [])[-8:]
+        for h in hist:
+            q = str(h.get("q", ""))
+            a = str(h.get("a", ""))
+            if q:
+                messages.append({"role": "user", "content": q})
+            if a:
+                messages.append({"role": "assistant", "content": a})
+        messages.append({"role": "user", "content": question})
+        return messages
 
     def _cmd_diag(self):
         # simple provider diagnostics

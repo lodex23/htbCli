@@ -68,3 +68,34 @@ class AIClient:
                 return f"[Ollama error] {e}"
         else:
             return "AI provider not configured. Set OPENAI_API_KEY or run Ollama locally and set OLLAMA_BASE_URL."
+
+    def chat(self, messages: list[dict], temperature: float = 0.2) -> str:
+        if self.config.provider == Provider.OPENAI and self._client is not None:
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self.config.model,
+                    messages=messages,
+                    temperature=temperature,
+                )
+                return (resp.choices[0].message.content or "").strip()
+            except Exception as e:
+                return f"[OpenAI error] {e}"
+        elif self.config.provider == Provider.OLLAMA:
+            try:
+                base = self.config.base_url or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+                url = f"{base.rstrip('/')}/api/chat"
+                payload = {
+                    "model": self.config.model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {"temperature": temperature},
+                }
+                r = requests.post(url, json=payload, timeout=120)
+                r.raise_for_status()
+                data = r.json()
+                msgs = data.get("message", {}).get("content") or data.get("messages", [{}])[-1].get("content")
+                return (msgs or "").strip()
+            except Exception as e:
+                return f"[Ollama error] {e}"
+        else:
+            return "AI provider not configured. Set OPENAI_API_KEY or run Ollama locally and set OLLAMA_BASE_URL."
