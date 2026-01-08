@@ -249,8 +249,7 @@ class HTBShell:
         ctx["services"] = list(merged.values())
         ctx.setdefault("artifacts", {})["nmap"] = str(path)
         self.store.save(self.current, ctx)
-        console.print(f"[green]Loaded {len(services)} services from Nmap.[/green]
-Known services updated. Run 'suggest' or 'cheats'.")
+        console.print(f"[green]Loaded {len(services)} services from Nmap.[/green]\nKnown services updated. Run 'suggest' or 'cheats'.")
 
     def _cmd_suggest(self, verbose: bool = True):
         try:
