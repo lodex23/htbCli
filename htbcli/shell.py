@@ -33,6 +33,8 @@ Commands:
   quiz <question>            Ask AI to answer a Starting Point quiz question
   note <text>                Add a note to this challenge
   load_nmap <path>           Load Nmap XML or gnmap and update services/context
+  add_service <port>/<proto> <name>
+                             Manually register a service (e.g., 445/tcp smb)
   suggest                    Suggest next steps based on known services/notes
   next                       Same as suggest but succinct
   cheats                     Show command templates for detected services
@@ -128,6 +130,8 @@ class HTBShell:
             self._cmd_ask(args, mode="quiz")
         elif cmd == "load_nmap":
             self._cmd_load_nmap(args)
+        elif cmd == "add_service":
+            self._cmd_add_service(args)
         elif cmd == "suggest":
             self._cmd_suggest(verbose=True)
         elif cmd == "next":
@@ -274,3 +278,30 @@ class HTBShell:
             return
         for title, content in cheats:
             console.print(Panel(content, title=title, border_style="blue"))
+
+    def _cmd_add_service(self, args: List[str]):
+        try:
+            ctx = self._require_current()
+        except RuntimeError:
+            return
+        if len(args) < 2:
+            console.print("Usage: add_service <port>/<proto> <name>")
+            return
+        pp = args[0]
+        name = " ".join(args[1:])
+        if "/" not in pp:
+            console.print("Format must be <port>/<proto>, e.g., 445/tcp")
+            return
+        port_str, proto = pp.split("/", 1)
+        try:
+            port = int(port_str)
+        except ValueError:
+            console.print("Port must be an integer")
+            return
+        # merge into services by key
+        key = f"{port}/{proto}"
+        merged = {f"{s['port']}/{s['proto']}": s for s in ctx.get("services", [])}
+        merged[key] = {"port": port, "proto": proto, "state": "open", "service": name, "product": "", "version": ""}
+        ctx["services"] = list(merged.values())
+        self.store.save(self.current, ctx)
+        console.print(f"[green]Service added:[/green] {key} {name}")
