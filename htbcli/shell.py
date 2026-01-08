@@ -242,7 +242,8 @@ class HTBShell:
         base = (
             "You are an ethical HTB assistant. Only provide legal guidance for authorized labs. "
             "You must respond with concrete, copy-pasteable commands, short explanations, and risk notes. "
-            "Never claim to have run commands."
+            "Never claim to have run commands. Avoid boilerplate. Use the provided Notes as ground truth and the Tried list to avoid repetition. "
+            "Prefer the most direct exploitation route."
         )
         if mode == "quiz":
             base += " Focus on Hack The Box Starting Point quiz answers. Be concise and cite the relevant service/step."
@@ -251,7 +252,14 @@ class HTBShell:
         tried = ctx.get("tried", [])
         creds = ctx.get("creds", [])
         target = ctx.get("target")
-        base += f"\nTarget: {json.dumps(target)}\nKnown services: {json.dumps(srv)}\nCreds: {json.dumps(creds)}\nNotes: {json.dumps(notes)}\nTried (avoid repeating): {json.dumps(tried)}\nGoal: Obtain user.txt/root.txt flags with minimal repetition."
+        base += (
+            f"\nTarget: {json.dumps(target)}"
+            f"\nKnown services: {json.dumps(srv)}"
+            f"\nCreds: {json.dumps(creds)}"
+            f"\nNotes (treat as ground truth): {json.dumps(notes)}"
+            f"\nTried (strictly avoid repeating): {json.dumps(tried)}"
+            "\nGoal: Obtain user.txt/root.txt quickly. Provide validations for each step and alternatives if a step fails."
+        )
         return base
 
     def _cmd_load_nmap(self, args: List[str]):
@@ -352,10 +360,11 @@ class HTBShell:
             return
         focus = " ".join(args).strip() if args else ""
         question = (
-            "Act as a senior HTB operator. Based on the Target, Services, Creds, Notes, and Tried list, "
-            "produce a concrete exploit plan to reach user.txt (and if feasible, root.txt). "
-            "Avoid repeating items in Tried. Output exact commands with placeholders filled using Target and Creds. "
-            "Prefer fastest path (e.g., mssql xp_cmdshell if MSSQL creds are present). "
+            "Act as a senior HTB operator. Create a deeply reasoned exploit plan using the given context. "
+            "Strictly avoid repeating any item from Tried. Use Notes as ground truth. "
+            "Provide: (1) a primary path with exact commands (filled with Target/Creds), (2) validations/success criteria after each step, "
+            "and (3) 1-2 alternative branches if the step fails (with commands). "
+            "Prefer the fastest viable path (e.g., leveraging service creds for direct code exec). "
         )
         if focus:
             question += f"Focus: {focus}. "
@@ -371,8 +380,8 @@ class HTBShell:
             return
         question = (
             "Generate a compact cheatsheet of ready-to-run commands tailored to the current context. "
-            "Prioritize services present and any available creds; include MSSQL, SMB, and file-read commands toward flags. "
-            "Avoid generic boilerplate; use the Target and Creds explicitly."
+            "Use Target/Creds explicitly; avoid placeholders unless unknown. Group by service (SMB/MSSQL/etc). "
+            "Include verification commands and 1-2 fallback variants per critical action. Avoid generic boilerplate."
         )
         messages = self._build_chat_messages(ctx, question, mode="general")
         answer = self.ai.chat(messages)
@@ -384,7 +393,7 @@ class HTBShell:
         target = ctx.get("target")
         services = ctx.get("services", [])
         creds = ctx.get("creds", [])
-        notes = ctx.get("notes", [])[-5:]  # recent notes
+        notes = ctx.get("notes", [])[-20:]
         tried = ctx.get("tried", [])
         summary = {
             "target": target,
