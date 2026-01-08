@@ -40,9 +40,12 @@ Commands:
   add_cred <user> <pass> [service]
                              Save a credential for later use
   mark_tried <keyword>       Mark a technique/step as tried to avoid repeats
+  guide [focus]              AI-driven exploit plan to reach user.txt/root.txt
+  ai_cheats                  AI-driven command cheats tailored to current context
   suggest                    Suggest next steps based on known services/notes
   next                       Same as suggest but succinct
   cheats                     Show command templates for detected services
+  diag                       Show AI/provider diagnostics
   help                       Show this help
   exit                       Exit the assistant
 """
@@ -149,8 +152,14 @@ class HTBShell:
             self._cmd_suggest(verbose=True)
         elif cmd == "next":
             self._cmd_suggest(verbose=False)
+        elif cmd == "guide":
+            self._cmd_guide(args)
         elif cmd == "cheats":
             self._cmd_cheats()
+        elif cmd == "ai_cheats":
+            self._cmd_ai_cheats()
+        elif cmd == "diag":
+            self._cmd_diag()
         else:
             console.print(f"Unknown command: {cmd}. Type 'help'.")
 
@@ -335,6 +344,53 @@ class HTBShell:
         ctx["services"] = list(merged.values())
         self.store.save(self.current, ctx)
         console.print(f"[green]Service added:[/green] {key} {name}")
+
+    def _cmd_guide(self, args: List[str]):
+        try:
+            ctx = self._require_current()
+        except RuntimeError:
+            return
+        focus = " ".join(args).strip() if args else ""
+        system = self._build_system_prompt(ctx, mode="general")
+        question = (
+            "Act as a senior HTB operator. Based on the Target, Services, Creds, Notes, and Tried list, "
+            "produce a concrete exploit plan to reach user.txt (and if feasible, root.txt). "
+            "Avoid repeating items in Tried. Output exact commands with placeholders filled using Target and Creds. "
+            "Prefer fastest path (e.g., mssql xp_cmdshell if MSSQL creds are present). "
+        )
+        if focus:
+            question += f"Focus: {focus}. "
+        question += "Respond in numbered steps with commands and brief rationale."
+        answer = self.ai.ask(system=system, question=question)
+        console.print(Panel.fit(answer, title="AI Guide", border_style="magenta"))
+
+    def _cmd_ai_cheats(self):
+        try:
+            ctx = self._require_current()
+        except RuntimeError:
+            return
+        system = self._build_system_prompt(ctx, mode="general")
+        question = (
+            "Generate a compact cheatsheet of ready-to-run commands tailored to the current context. "
+            "Prioritize services present and any available creds; include MSSQL, SMB, and file-read commands toward flags. "
+            "Avoid generic boilerplate; use the Target and Creds explicitly."
+        )
+        answer = self.ai.ask(system=system, question=question)
+        console.print(Panel.fit(answer, title="AI Cheats", border_style="magenta"))
+
+    def _cmd_diag(self):
+        # simple provider diagnostics
+        prov = os.environ.get("HTBCLI_PROVIDER", "auto")
+        openai_key = "set" if os.environ.get("OPENAI_API_KEY") else "missing"
+        openai_model = os.environ.get("HTBCLI_OPENAI_MODEL", "gpt-4o-mini")
+        ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_model = os.environ.get("HTBCLI_OLLAMA_MODEL", "llama3.1:8b")
+        msg = {
+            "provider": prov,
+            "openai": {"api_key": openai_key, "model": openai_model},
+            "ollama": {"base_url": ollama_url, "model": ollama_model},
+        }
+        console.print(Panel.fit(json.dumps(msg, indent=2), title="diag", border_style="yellow"))
 
     def _cmd_set(self, args: List[str]):
         try:
