@@ -29,12 +29,17 @@ Commands:
   use <name>                 Switch to an existing challenge
   list                       List challenges
   show                       Show current challenge context
+  status                     Show a concise status summary
   ask <question>             Ask AI any question in context of this challenge
   quiz <question>            Ask AI to answer a Starting Point quiz question
   note <text>                Add a note to this challenge
   load_nmap <path>           Load Nmap XML or gnmap and update services/context
   add_service <port>/<proto> <name>
                              Manually register a service (e.g., 445/tcp smb)
+  set target <ip|host>       Set the current target (used in cheats/suggestions)
+  add_cred <user> <pass> [service]
+                             Save a credential for later use
+  mark_tried <keyword>       Mark a technique/step as tried to avoid repeats
   suggest                    Suggest next steps based on known services/notes
   next                       Same as suggest but succinct
   cheats                     Show command templates for detected services
@@ -122,6 +127,8 @@ class HTBShell:
             self._cmd_list()
         elif cmd == "show":
             self._cmd_show()
+        elif cmd == "status":
+            self._cmd_status()
         elif cmd == "note":
             self._cmd_note(args)
         elif cmd == "ask":
@@ -132,6 +139,12 @@ class HTBShell:
             self._cmd_load_nmap(args)
         elif cmd == "add_service":
             self._cmd_add_service(args)
+        elif cmd == "set":
+            self._cmd_set(args)
+        elif cmd == "add_cred":
+            self._cmd_add_cred(args)
+        elif cmd == "mark_tried":
+            self._cmd_mark_tried(args)
         elif cmd == "suggest":
             self._cmd_suggest(verbose=True)
         elif cmd == "next":
@@ -226,7 +239,10 @@ class HTBShell:
             base += " Focus on Hack The Box Starting Point quiz answers. Be concise and cite the relevant service/step."
         srv = ctx.get("services", [])
         notes = ctx.get("notes", [])
-        base += f"\nKnown services: {json.dumps(srv)}\nNotes: {json.dumps(notes)}"
+        tried = ctx.get("tried", [])
+        creds = ctx.get("creds", [])
+        target = ctx.get("target")
+        base += f"\nTarget: {json.dumps(target)}\nKnown services: {json.dumps(srv)}\nCreds: {json.dumps(creds)}\nNotes: {json.dumps(notes)}\nTried (avoid repeating): {json.dumps(tried)}\nGoal: Obtain user.txt/root.txt flags with minimal repetition."
         return base
 
     def _cmd_load_nmap(self, args: List[str]):
@@ -261,11 +277,20 @@ class HTBShell:
         except RuntimeError:
             return
         steps = next_steps_from_services(ctx.get("services", []), verbose=verbose)
+        # Filter out steps marked as tried
+        tried = set(map(str.lower, ctx.get("tried", [])))
         if not steps:
             console.print("[yellow]No suggestions yet. Add notes or load Nmap first.[/yellow]")
             return
+        shown = 0
         for title, content in steps:
+            blob = f"{title}\n{content}".lower()
+            if any(t in blob for t in tried):
+                continue
             console.print(Panel(content, title=title, border_style="green"))
+            shown += 1
+        if shown == 0:
+            console.print("[yellow]All known suggestions were marked as tried. Add new intel or load Nmap for more paths.[/yellow]")
 
     def _cmd_cheats(self):
         try:
@@ -305,3 +330,62 @@ class HTBShell:
         ctx["services"] = list(merged.values())
         self.store.save(self.current, ctx)
         console.print(f"[green]Service added:[/green] {key} {name}")
+
+    def _cmd_set(self, args: List[str]):
+        try:
+            ctx = self._require_current()
+        except RuntimeError:
+            return
+        if len(args) < 2 or args[0] != "target":
+            console.print("Usage: set target <ip|host>")
+            return
+        ctx["target"] = args[1]
+        self.store.save(self.current, ctx)
+        console.print(f"[green]Target set:[/green] {ctx['target']}")
+
+    def _cmd_add_cred(self, args: List[str]):
+        try:
+            ctx = self._require_current()
+        except RuntimeError:
+            return
+        if len(args) < 2:
+            console.print("Usage: add_cred <user> <pass> [service]")
+            return
+        user = args[0]
+        pwd = args[1]
+        svc = args[2] if len(args) > 2 else ""
+        ctx.setdefault("creds", []).append({"user": user, "pass": pwd, "service": svc})
+        self.store.save(self.current, ctx)
+        console.print(f"[green]Credential saved for[/green] {user} ({svc or 'generic'})")
+
+    def _cmd_mark_tried(self, args: List[str]):
+        try:
+            ctx = self._require_current()
+        except RuntimeError:
+            return
+        if not args:
+            console.print("Usage: mark_tried <keyword>")
+            return
+        kw = " ".join(args).strip()
+        if not kw:
+            console.print("Provide a non-empty keyword")
+            return
+        tried = ctx.setdefault("tried", [])
+        if kw not in tried:
+            tried.append(kw)
+            self.store.save(self.current, ctx)
+        console.print(f"[green]Marked as tried:[/green] {kw}")
+
+    def _cmd_status(self):
+        try:
+            ctx = self._require_current()
+        except RuntimeError:
+            return
+        summary = {
+            "target": ctx.get("target"),
+            "services": [f"{s.get('port')}/{s.get('proto')} {s.get('service')}" for s in ctx.get("services", [])],
+            "creds": ctx.get("creds", []),
+            "notes_count": len(ctx.get("notes", [])),
+            "tried": ctx.get("tried", []),
+        }
+        console.print(Panel.fit(json.dumps(summary, indent=2), title=f"status: {self.current}", border_style="cyan"))
