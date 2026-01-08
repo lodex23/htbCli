@@ -11,6 +11,7 @@ from rich.prompt import Prompt, Confirm
 from rich.pretty import pprint
 
 from .storage import ChallengeStore, ensure_data_dir
+from .config import load_config
 from .ai import AIClient, AIConfig, Provider
 from .parsers.nmap import parse_nmap
 from .suggestions import next_steps_from_services, cheatsheets_for_services
@@ -47,7 +48,27 @@ class HTBShell:
         self.ai = self._init_ai()
 
     def _init_ai(self) -> AIClient:
-        provider = os.environ.get("HTBCLI_PROVIDER", "auto").lower()
+        # Load project/user config
+        cfg = load_config(Path.cwd())
+
+        # Determine provider with precedence: env > config > default("auto")
+        provider = os.environ.get("HTBCLI_PROVIDER") or str(cfg.get("provider", "auto"))
+        provider = (provider or "auto").lower()
+
+        # If config provides secrets and env is missing, set env for clients
+        openai_cfg = cfg.get("openai", {}) if isinstance(cfg.get("openai"), dict) else {}
+        if not os.environ.get("OPENAI_API_KEY") and openai_cfg.get("api_key"):
+            os.environ["OPENAI_API_KEY"] = str(openai_cfg.get("api_key"))
+        if not os.environ.get("HTBCLI_OPENAI_MODEL") and openai_cfg.get("model"):
+            os.environ["HTBCLI_OPENAI_MODEL"] = str(openai_cfg.get("model"))
+
+        ollama_cfg = cfg.get("ollama", {}) if isinstance(cfg.get("ollama"), dict) else {}
+        if not os.environ.get("OLLAMA_BASE_URL") and ollama_cfg.get("base_url"):
+            os.environ["OLLAMA_BASE_URL"] = str(ollama_cfg.get("base_url"))
+        if not os.environ.get("HTBCLI_OLLAMA_MODEL") and ollama_cfg.get("model"):
+            os.environ["HTBCLI_OLLAMA_MODEL"] = str(ollama_cfg.get("model"))
+
+        # Choose provider
         if provider == "openai" or (provider == "auto" and os.environ.get("OPENAI_API_KEY")):
             config = AIConfig(provider=Provider.OPENAI, model=os.environ.get("HTBCLI_OPENAI_MODEL", "gpt-4o-mini"))
         elif provider == "ollama" or provider == "auto":

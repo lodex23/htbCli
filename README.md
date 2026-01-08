@@ -37,6 +37,37 @@ On first run you must confirm the ethics notice.
 - `OPENAI_API_KEY` (when using OpenAI)
 - `OLLAMA_BASE_URL` (when using Ollama; default `http://localhost:11434`)
 
+## Project/User config.yaml (alternative to env vars)
+You can configure the CLI using YAML files without setting env vars.
+
+- Precedence (highest to lowest):
+  - Environment variables
+  - Project config: `./.htbcli/config.yaml`
+  - User config: `~/.htbcli/config.yaml`
+  - Built-in defaults
+
+Example file is provided at `examples/config.example.yaml`.
+
+Project-local setup (Linux/macOS):
+```
+mkdir -p .htbcli
+cp examples/config.example.yaml .htbcli/config.yaml
+$EDITOR .htbcli/config.yaml
+```
+
+Example contents:
+```yaml
+provider: openai    # or: ollama or auto
+openai:
+  api_key: "sk-..."
+  model: "gpt-4o-mini"
+ollama:
+  base_url: "http://localhost:11434"
+  model: "llama3.1:8b"
+```
+
+Note: `.htbcli/` is gitignored in this repo to avoid committing secrets.
+
 ## Commands inside the REPL
 - `start <name> [type]`  Start a new challenge, e.g. `start lame machine`
 - `use <name>`           Switch to an existing challenge

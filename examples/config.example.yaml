@@ -1,0 +1,14 @@
+# Example project-local configuration for HTB CLI
+# Copy this file to .htbcli/config.yaml (project root) or to ~/.htbcli/config.yaml (user scope)
+# Do NOT commit real secrets.
+
+# Choose the AI provider: openai | ollama | auto
+provider: openai
+
+openai:
+  api_key: "sk-...your-key-here..."
+  model: "gpt-4o-mini"
+
+ollama:
+  base_url: "http://localhost:11434"
+  model: "llama3.1:8b"
