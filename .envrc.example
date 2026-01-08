@@ -1,0 +1,14 @@
+# direnv example for project-local environment
+# Copy to .envrc and adjust values, then run: direnv allow
+
+# Choose provider: openai | ollama | auto
+export HTBCLI_PROVIDER=openai
+
+# OpenAI config (uncomment if using OpenAI)
+# export OPENAI_API_KEY="sk-...your-key..."
+# export HTBCLI_OPENAI_MODEL="gpt-4o-mini"
+
+# Ollama config (uncomment if using Ollama)
+# export HTBCLI_PROVIDER=ollama
+# export HTBCLI_OLLAMA_MODEL="llama3.1:8b"
+# export OLLAMA_BASE_URL="http://localhost:11434"

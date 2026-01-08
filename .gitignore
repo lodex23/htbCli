@@ -35,3 +35,7 @@ htmlcov/
 
 # Local data (ensure no secrets)
 .htbcli/
+
+# Local environment (do not commit secrets)
+.env
+.envrc
