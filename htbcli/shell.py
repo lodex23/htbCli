@@ -42,6 +42,10 @@ Commands:
   mark_tried <keyword>       Mark a technique/step as tried to avoid repeats
   guide [focus]              AI-driven exploit plan to reach user.txt/root.txt
   ai_cheats                  AI-driven command cheats tailored to current context
+  add_artifact <label> <path>
+                             Attach output/log to context (e.g., whoami_priv.txt)
+  add_artifact_text <label> <text>
+                             Attach short inline text artifact
   suggest                    Suggest next steps based on known services/notes
   next                       Same as suggest but succinct
   cheats                     Show command templates for detected services
@@ -56,6 +60,18 @@ class HTBShell:
         self.store = ChallengeStore()
         self.current: Optional[str] = None
         self.ai = self._init_ai()
+        # AI prefs from config
+        cfg = load_config(Path.cwd())
+        ai_cfg = cfg.get("ai", {}) if isinstance(cfg.get("ai"), dict) else {}
+        self.ai_detail: str = str(ai_cfg.get("detail", "normal")).lower()  # high|normal|min
+        try:
+            self.history_depth: int = int(ai_cfg.get("history_depth", 15))
+        except Exception:
+            self.history_depth = 15
+        try:
+            self.max_artifacts: int = int(ai_cfg.get("max_artifacts", 3))
+        except Exception:
+            self.max_artifacts = 3
 
     def _init_ai(self) -> AIClient:
         # Load project/user config
@@ -160,6 +176,10 @@ class HTBShell:
             self._cmd_ai_cheats()
         elif cmd == "diag":
             self._cmd_diag()
+        elif cmd == "add_artifact":
+            self._cmd_add_artifact(args)
+        elif cmd == "add_artifact_text":
+            self._cmd_add_artifact_text(args)
         else:
             console.print(f"Unknown command: {cmd}. Type 'help'.")
 
@@ -258,8 +278,15 @@ class HTBShell:
             f"\nCreds: {json.dumps(creds)}"
             f"\nNotes (treat as ground truth): {json.dumps(notes)}"
             f"\nTried (strictly avoid repeating): {json.dumps(tried)}"
+            "\nForbidden: Do not suggest any step that appears in Tried or is already accomplished per Notes (e.g., re-enumerating SMB or re-downloading files)."
+            "\nIf crucial information is missing, ask up to 3 concise clarifying questions instead of giving a plan, and stop."
             "\nGoal: Obtain user.txt/root.txt quickly. Provide validations for each step and alternatives if a step fails."
         )
+        # Level of detail hint
+        if self.ai_detail == "high":
+            base += "\nAnswer length preference: very detailed with explicit commands and rationale."
+        elif self.ai_detail == "min":
+            base += "\nAnswer length preference: terse commands only."
         return base
 
     def _cmd_load_nmap(self, args: List[str]):
@@ -395,19 +422,24 @@ class HTBShell:
         creds = ctx.get("creds", [])
         notes = ctx.get("notes", [])[-20:]
         tried = ctx.get("tried", [])
+        # include recent artifacts
+        artifacts = ctx.get("artifacts", {})
+        art_items = list(artifacts.items())[-self.max_artifacts:]
+        art_summary = [{"label": k, "size": len(str(v))} for k, v in art_items]
         summary = {
             "target": target,
             "services": services,
             "creds": creds,
             "notes_recent": notes,
             "tried": tried,
+            "artifacts": art_summary,
         }
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": system},
             {"role": "system", "content": "Context summary: " + json.dumps(summary)},
         ]
         # Include recent history for continuity
-        hist = ctx.get("history", [])[-8:]
+        hist = ctx.get("history", [])[-self.history_depth:]
         for h in hist:
             q = str(h.get("q", ""))
             a = str(h.get("a", ""))
@@ -415,6 +447,12 @@ class HTBShell:
                 messages.append({"role": "user", "content": q})
             if a:
                 messages.append({"role": "assistant", "content": a})
+        # add small artifacts content inline (truncated)
+        for k, v in art_items:
+            content = str(v)
+            if len(content) > 2000:
+                content = content[:2000] + "\n...[truncated]"
+            messages.append({"role": "system", "content": f"Artifact {k}:\n" + content})
         messages.append({"role": "user", "content": question})
         return messages
 
@@ -429,6 +467,7 @@ class HTBShell:
             "provider": prov,
             "openai": {"api_key": openai_key, "model": openai_model},
             "ollama": {"base_url": ollama_url, "model": ollama_model},
+            "ai_prefs": {"detail": self.ai_detail, "history_depth": self.history_depth, "max_artifacts": self.max_artifacts},
         }
         console.print(Panel.fit(json.dumps(msg, indent=2), title="diag", border_style="yellow"))
 
@@ -476,6 +515,42 @@ class HTBShell:
             tried.append(kw)
             self.store.save(self.current, ctx)
         console.print(f"[green]Marked as tried:[/green] {kw}")
+
+    def _cmd_add_artifact(self, args: List[str]):
+        try:
+            ctx = self._require_current()
+        except RuntimeError:
+            return
+        if len(args) < 2:
+            console.print("Usage: add_artifact <label> <path>")
+            return
+        label = args[0]
+        path = Path(args[1]).expanduser()
+        if not path.exists():
+            console.print(f"[red]File not found: {path}[/red]")
+            return
+        try:
+            content = path.read_text(errors="ignore")
+        except Exception as e:
+            console.print(f"[red]Failed to read file: {e}[/red]")
+            return
+        ctx.setdefault("artifacts", {})[label] = content
+        self.store.save(self.current, ctx)
+        console.print(f"[green]Artifact added:[/green] {label} ({len(content)} bytes)")
+
+    def _cmd_add_artifact_text(self, args: List[str]):
+        try:
+            ctx = self._require_current()
+        except RuntimeError:
+            return
+        if len(args) < 2:
+            console.print("Usage: add_artifact_text <label> <text>")
+            return
+        label = args[0]
+        text = " ".join(args[1:])
+        ctx.setdefault("artifacts", {})[label] = text
+        self.store.save(self.current, ctx)
+        console.print(f"[green]Artifact text added:[/green] {label}")
 
     def _cmd_status(self):
         try:
