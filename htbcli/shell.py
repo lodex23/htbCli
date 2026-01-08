@@ -276,7 +276,12 @@ class HTBShell:
             ctx = self._require_current()
         except RuntimeError:
             return
-        steps = next_steps_from_services(ctx.get("services", []), verbose=verbose)
+        steps = next_steps_from_services(
+            ctx.get("services", []),
+            verbose=verbose,
+            target=ctx.get("target"),
+            creds=ctx.get("creds"),
+        )
         # Filter out steps marked as tried
         tried = set(map(str.lower, ctx.get("tried", [])))
         if not steps:
