@@ -282,6 +282,17 @@ class HTBShell:
             "\nIf crucial information is missing, ask up to 3 concise clarifying questions instead of giving a plan, and stop."
             "\nGoal: Obtain user.txt/root.txt quickly. Provide validations for each step and alternatives if a step fails."
         )
+        # Heuristics to bias toward the current phase captured in notes
+        notes_text = "\n".join(map(str, notes)).lower()
+        if "reverse shell" in notes_text or "reverse_shell" in notes_text:
+            base += (
+                "\nContext hint: A reverse shell is already established; operate from that shell."
+                " Avoid suggesting SMB enumeration or MSSQL xp_cmdshell unless the user explicitly asks to pivot back."
+            )
+        if "avoid smb" in notes_text or "do not suggest smb" in notes_text:
+            base += "\nForbidden: Any SMB-related steps."
+        if "do not use printspoofer" in notes_text or "avoid printspoofer" in notes_text:
+            base += "\nForbidden: PrintSpoofer."
         # Level of detail hint
         if self.ai_detail == "high":
             base += "\nAnswer length preference: very detailed with explicit commands and rationale."
